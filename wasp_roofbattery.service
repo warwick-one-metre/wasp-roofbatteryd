@@ -1,0 +1,15 @@
+[Unit]
+Description=Daemon for monitoring the SuperWASP roof battery
+After=syslog.target
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Restart=on-failure
+Type=simple
+ExecStart=/usr/bin/env python3.4 -u /usr/bin/roofbatteryd
+ExecStartPost=/usr/bin/env python3.4 -u /usr/bin/obslog info wasp_roofbatteryd Started by systemd
+ExecStopPost=/usr/bin/env python3.4 -u /usr/bin/obslog info wasp_roofbatteryd Stopped by systemd
+StandardOutput=syslog
+StandardError=syslog
+

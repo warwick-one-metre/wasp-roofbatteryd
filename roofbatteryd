@@ -1,0 +1,119 @@
+#!/usr/bin/env python3.4
+#
+# This file is part of wasp-roofbatteryd.
+#
+# wasp-roofbatteryd is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# wasp-roofbatteryd is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with wasp-roofbatteryd.  If not, see <http://www.gnu.org/licenses/>.
+
+"""Roof battery voltage monitor for the SuperWASP telescope"""
+
+# pylint: disable=broad-except
+# pylint: disable=invalid-name
+
+import datetime
+import re
+import sys
+import threading
+import time
+import traceback
+import Pyro4
+import serial
+from warwick.observatory.common import daemons, log
+
+print(daemons.superwasp_roofbattery.host)
+# Set automatically when generating RPM package
+SOFTWARE_VERSION = "UNKNOWN"
+
+SERIAL_PORT = '/dev/roofbattery'
+SERIAL_BAUD = 9600
+SERIAL_TIMEOUT = 5
+
+# pylint: disable=anomalous-backslash-in-string
+DATA_REGEX = b'^(?P<voltage>[-+][0-9]{2}\.[0-9]{2})\r\n$'
+# pylint: enable=anomalous-backslash-in-string
+
+LOG_PREFIX = 'wasp_roofbatteryd'
+
+class RoofBatteryDaemon:
+    """Daemon class that wraps the RS232 interface"""
+    def __init__(self):
+        self._running = True
+        self._port_error = False
+        self._regex = re.compile(DATA_REGEX, re.DOTALL)
+        self._latest = None
+        self._port = None
+
+        runloop = threading.Thread(target=self.run)
+        runloop.daemon = True
+        runloop.start()
+
+    def run(self):
+        """Main run loop"""
+        while self._running:
+            # Initial setup
+            try:
+                self._port = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=SERIAL_TIMEOUT)
+                print('Connected to', SERIAL_PORT)
+                prefix = 'Restored' if self._port_error else 'Established'
+                log.info(LOG_PREFIX, prefix + ' serial connection to battery monitor')
+                self._port_error = False
+            except Exception:
+                traceback.print_exc(file=sys.stdout)
+                print('Will retry in 10 seconds...')
+                if not self._port_error:
+                    log.error(LOG_PREFIX, 'Failed to connect to battery monitor')
+
+                self._port_error = True
+
+                time.sleep(10.)
+                continue
+
+            try:
+                self._latest = None
+
+                # Flush any stale state
+                self._port.flushInput()
+                self._port.flushOutput()
+
+                # First line may have been only partially recieved
+                self._port.readline()
+
+                # Main run loop
+                while self._running:
+                    data = self._port.readline()
+                    match = self._regex.match(data)
+
+                    if match:
+                        # Variable assignment is atomic, so don't need a lock
+                        self._latest = {
+                            'date': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                            'voltage': float(match.group('voltage')),
+                            'software_version': SOFTWARE_VERSION,
+                        }
+
+            except Exception:
+                self._port.close()
+                traceback.print_exc(file=sys.stdout)
+                print('Will retry in 10 seconds...')
+                if not self._port_error:
+                    log.error(LOG_PREFIX, 'Lost serial connection to battery monitor')
+                self._port_error = True
+                time.sleep(10.)
+
+    @Pyro4.expose
+    def last_measurement(self):
+        """Query the latest valid measurement."""
+        return self._latest
+
+if __name__ == '__main__':
+    daemons.superwasp_roofbattery.launch(RoofBatteryDaemon())
