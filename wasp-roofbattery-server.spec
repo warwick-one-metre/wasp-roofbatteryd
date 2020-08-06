@@ -1,12 +1,12 @@
 Name:      wasp-roofbattery-server
-Version:   1.1.0
+Version:   1.1.1
 Release:   0
 Url:       https://github.com/warwick-one-metre/wasp-roofbatteryd
 Summary:   Roof battery voltage monitor for the SuperWASP telescope.
 License:   GPL-3.0
 Group:     Unspecified
 BuildArch: noarch
-Requires:  python36, python36-Pyro4, python36-pyserial, python36-warwick-observatory-common
+Requires:  python3, python3-Pyro4, python3-pyserial, python3-warwick-observatory-common
 Requires:  observatory-log-client, %{?systemd_requires}
 
 %description
